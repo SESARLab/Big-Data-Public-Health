@@ -12,20 +12,22 @@ object SparkVisit {
   def main(args: Array[String]) {
     val conf = new SparkConf().setAppName("Spark Visit")
     val spark = new SparkContext(conf)
+    val sqlContext = new org.apache.spark.sql.SQLContext(spark)
+    import sqlContext.implicits._
     // Parameters used:
     // max_glu_serum,A1Cresult,insulin, diabetesMed
     
     val basePath = if (args.length > 0) args(0).toString else ""
 
     // Load the file to a DataFrame
-    val data = sc.textFile(basePath + "\\diab.csv")
+    val data = sc.textFile(basePath + "\\myCSV.csv")
     .filter(!_.contains("encounter_id"))
     .map(_.split(","))
-    .map(p => Visit(p(1),convert(p(22)),convert(p(23)), convert(p(41)),checkSano(p(48))))
+    .map(p => Visit(p(1),convert(p(22)),convert(p(23)), convert(p(41)),checkSano(p(49))))
     .toDF("ID","Feat1", "Feat2", "Feat3", "Sano").cache()
 
     // Grouping by the number of visit of single user
-    val raggr= data.groupBy($"ID").agg(count($"ID").alias("NumVisite"));
+    val raggr= data.groupBy($"ID").agg(count($"ID").alias("NumVisite"))
 
     // Creo i LabeledPoint con tutte le features
     val labeledAll = data.map(row => LabeledPoint(row.getDouble(4), Vectors.dense(row.getDouble(1), row.getDouble(2), row.getDouble(3))))
@@ -50,23 +52,24 @@ object SparkVisit {
     svm.setIntercept(true)
     val model = svm.run(labeled_2_and_3)
 
-    val scoreAndLabels = labeled.map { point =>
+    model.clearThreshold
+
+    val scoreAndLabels = labeled_2_and_3.map { point =>
       val score = model.predict(point.features)
       (score, point.label)
     }
 
-    model.clearThreshold
+    
 
     val metrics = new BinaryClassificationMetrics(scoreAndLabels)
     val areaUnderROC = metrics.areaUnderROC()
-    println("Area under ROC = " + auROC)
+    println("Area under ROC = " + areaUnderROC)
 
     // ROC Curve
-    val roc = metrics.roc.collect()
+    val roc = metrics.roc
     
     // Save RDD in csv
     roc.map(line => line._1 +","+line._2).coalesce(1,true).saveAsTextFile(basePath + "\\roc")
-
     spark.stop()
   }
 
